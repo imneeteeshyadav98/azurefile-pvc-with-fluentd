@@ -1,0 +1,118 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fluentd
+  namespace: efk-cloud
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fluentd
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: fluentd
+roleRef:
+  kind: ClusterRole
+  name: fluentd
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: fluentd
+  namespace: efk-cloud
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluentd
+  namespace: efk-cloud
+  labels:
+    k8s-app: fluentd-logging
+    version: v1
+spec:
+  selector:
+    matchLabels:
+      k8s-app: fluentd-logging
+      version: v1
+  template:
+    metadata:
+      labels:
+        k8s-app: fluentd-logging
+        version: v1
+    spec:
+      serviceAccount: fluentd
+      serviceAccountName: fluentd
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      containers:
+      - name: fluentd
+        image: fluent/fluentd-kubernetes-daemonset:v1-debian-elasticsearch
+        env:
+          - name:  FLUENT_ELASTICSEARCH_HOST
+            value: "f32ece35866e45438ebb75a40a90f9e8.eastus.azure.elastic-cloud.com"
+          - name:  FLUENT_ELASTICSEARCH_PORT
+            value: "9243"
+          - name: FLUENT_ELASTICSEARCH_SCHEME
+            value: "https"
+          # Option to configure elasticsearch plugin with self signed certs
+          # ================================================================
+          - name: FLUENT_ELASTICSEARCH_SSL_VERIFY
+            value: "true"
+          # Option to configure elasticsearch plugin with tls
+          # ================================================================
+          - name: FLUENT_ELASTICSEARCH_SSL_VERSION
+            value: "TLSv1_2"
+          # X-Pack Authentication
+          # =====================
+          - name: FLUENT_ELASTICSEARCH_USER
+            value: "elastic"
+          - name: FLUENT_ELASTICSEARCH_PASSWORD
+            value: "g7XU61x5AMRbeFRazMc3RiHV"
+        resources:
+          limits:
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log/customlog
+        # When actual pod logs in /var/lib/docker/containers, the following lines should be used.
+        # - name: dockercontainerlogdirectory
+        #   mountPath: /var/lib/docker/containers
+        #   readOnly: true
+        # When actual pod logs in /var/log/pods, the following lines should be used.
+        - name: azurefile-pvc
+          mountPath: /var/log
+        - name: fluentd-config
+          mountPath: /fluentd/etc
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log/customlog
+      # When actual pod logs in /var/lib/docker/containers, the following lines should be used.
+      # - name: dockercontainerlogdirectory
+      #   hostPath:
+      #     path: /var/lib/docker/containers
+      # When actual pod logs in /var/log/pods, the following lines should be used.
+      - name: fluentd-config
+        configMap:
+          name: fluentd-config
+      - name: azurefile-pvc
+        persistentVolumeClaim:
+          claimName: azurefile-pvc-01
